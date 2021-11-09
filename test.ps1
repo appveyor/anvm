@@ -1,3 +1,5 @@
+$ErrorActionPreference = 'Stop'
+
 # re-load module
 Clear-Host
 Remove-Module anvm -Force -ErrorAction SilentlyContinue
