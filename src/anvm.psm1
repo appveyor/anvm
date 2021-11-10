@@ -5,24 +5,69 @@ if (Get-Command "7z" -ErrorAction SilentlyContinue) {
 }
 $node64Path = "$env:ProgramFiles\nodejs"
 $node32Path = "${env:ProgramFiles(x86)}\nodejs"
+$global:node_versions = @()
 
 function Install-NodeVersion {
     param(
-        [Parameter(Mandatory=$true, Position=0, ValueFromRemainingArguments=$true)]
-        [string]$version
+        [Parameter(Mandatory=$true, Position=0)]
+        [string]$version,
+        [Parameter(Mandatory=$false, Position=1)]
+        [ValidateSet('x64', 'x86')]
+        [string]$arch
     )
-    
-    Write-Host "Installing Node $version"
-    Write-Host "7z available: $sevenZipAvailable"
 
-    #$destPath = getNodePath("1.0.0", "x64")
-    #unzip "17.0.1" "x64" "C:\Users\feodo\Downloads\node-v17.0.1-win-x64.7z"
-    #installNodeMsi "15.14.0" "x64" ""C:\Users\feodo\Downloads\node-v15.14.0-x64.msi""
-    #getUninstallString "Node.js"
-    uninstallNode
+    if (-not $arch) {
+        $arch = 'x64'
+    }
 
-    # 1. Get the exact version of Node
-    # 2. Download and unpack/install Node version
+    $version = getNodeVersion $version
+
+    $v = parseVersion $version
+    if ($v.Major -ge 1 -and $v.Major -lt 4) {
+        $baseUrl = "https://iojs.org/dist/v$version"
+        $productName = "iojs"
+    } else {
+        $baseUrl = "https://nodejs.org/dist/v$version"
+        $productName = "node"
+    }
+
+    Write-Host "Installing Node v$version $arch..." -NoNewline
+
+    $nodePath = getNodePath $version $arch
+    if (Test-Path $nodePath) {
+        Write-Host "already installed"
+    } else {
+        $origProg = $ProgressPreference
+        $ProgressPreference = 'SilentlyContinue'
+        $fileName = "$productName-v$version-win-$arch.7z"
+        try {
+            $packageUrl = "$baseUrl/$fileName"
+            Invoke-WebRequest -Uri $packageUrl -OutFile "$env:TEMP\$fileName" -UseBasicParsing
+        } catch {
+            $fileName = "$productName-v$version-$arch.msi"
+            $packageUrl = "$baseUrl/$fileName"
+            try {
+                Invoke-WebRequest -Uri $packageUrl -OutFile "$env:TEMP\$fileName" -UseBasicParsing
+            } catch {
+                $packageUrl = "$baseUrl/x64/$fileName"
+                try {
+                    Invoke-WebRequest -Uri $packageUrl -OutFile "$env:TEMP\$fileName" -UseBasicParsing
+                } catch {
+                    throw "Package not found!"
+                }
+            }
+        } finally {
+            $ProgressPreference = $origProg
+        }
+
+        if ($fileName.EndsWith(".msi")) {
+            installNodeMsi $version $arch "$env:TEMP\$fileName"
+        } else {
+            unzip $version $arch "$env:TEMP\$fileName"
+        }
+
+        Write-Host "OK"
+    }
 }
 
 function Set-NodeVersion {
@@ -56,7 +101,6 @@ function parseVersion([string]$str) {
         major = -1
         minor = -1
         build = -1
-        revision = -1
         number = 0
         value = $null
     }
@@ -72,9 +116,6 @@ function parseVersion([string]$str) {
     if($versionDigits.Length -gt 2) {
         $version.build = [int]$versionDigits[2]
     }
-    if($versionDigits.Length -gt 3) {
-        $version.revision = [int]$versionDigits[3]
-    }
 
     for($i = 0; $i -lt $versionDigits.Length; $i++) {
         $version.number += [long]$versionDigits[$i] -shl 16 * (3 - $i)
@@ -84,17 +125,44 @@ function parseVersion([string]$str) {
 }
 
 function getNodeVersion([string]$partialVersion) {
-    # TODO
-    # Supported aliases:
-    # - lts/stable
-    # - current/latest
-    # Use https://nodejs.org/dist/index.json
+    if ($global:node_versions.Length -eq 0) {
+        $global:node_versions = (Invoke-WebRequest -Uri 'https://nodejs.org/dist/index.json' -UseBasicParsing).Content | ConvertFrom-Json
+        $global:node_versions += (Invoke-WebRequest -Uri 'https://iojs.org/dist/index.json' -UseBasicParsing).Content | ConvertFrom-Json
+    }
+
+    if ($partialVersion -eq 'lts' -or $partialVersion -eq 'stable') {
+        foreach($ver in $global:node_versions) {
+            if ($ver.lts) {
+                return $ver.version.substring(1)
+            }
+        }
+    } elseif ($partialVersion -eq 'current' -or $partialVersion -eq 'latest') {
+        return $global:node_versions[0].version.substring(1)
+    } else {
+        $v = parseVersion $partialVersion
+        if ($v.major -ne -1 -and $v.minor -ne -1 -and $v.build -ne -1) {
+            return $partialVersion
+        } else {
+            $prefix = $partialVersion.Trim(".") + "."
+            $latestVersion = $null
+            foreach($ver in $global:node_versions) {
+                $vj = $ver.version.substring(1)
+                if ($vj.startswith($prefix)) {
+                    if ($null -eq $latestVersion -or (parseVersion $vj).number -gt (parseVersion $latestVersion).number) {
+                        $latestVersion = $vj
+                    }
+                }
+            }
+            if ($null -eq $latestVersion) {
+                throw "Node v$partialVersion not found"
+            }
+            return $latestVersion
+        }
+    }
 }
 
 function unzip([string]$version, [string]$arch, [string]$zipfile)
 {
-    Write-Host "Unpacking Node v$version $arch..."
-
     # unpack to a temp dir
     $tempPath = "$env:TEMP\anvm-$version-$arch"
     if ($sevenZipAvailable) {
@@ -120,30 +188,37 @@ function installNodeMsi([string]$version, [string]$arch, [string]$msiFile) {
         $features = 'NodeRuntime,NodeAlias,npm' 
     }
 
-    Write-Host "Installing Node v$version $arch..."
+    $tempDir = "$env:TEMP\anvm-$version-$arch"
     ensureElevatedModeOnWindows "Installing Node from MSI requires elevated mode."
     $destDir = getNodePath $version $arch
-    $msiArgs = @("/i", "`"$msiFile`"", "/q", "ADDLOCAL=$features", "INSTALLDIR=`"$destDir`"", "/L*V", "C:\Projects\2\example.log")
+    $msiArgs = @("/i", "`"$msiFile`"", "/q", "ADDLOCAL=$features", "INSTALLDIR=`"$tempDir`""<#, "/L*V", "C:\Projects\2\node-install.log"#>)
 
     $result = Start-Process -FilePath "msiexec.exe" -Wait -PassThru -ArgumentList $msiArgs
     if ($result.ExitCode -ne 0) {
         throw "msiexec installing node.msi exited with $($result.ExitCode)"
     }
+
+    # copy installation
+    New-Item -Path $destDir -ItemType Directory -Force | Out-Null
+    Get-ChildItem -Path $tempDir | Copy-Item -Destination $destDir -Force -Recurse
+
+    # uninstall node
+    uninstallNode
 }
 
 function uninstallNode() {
     $uninstallCommand = getUninstallString "Node.js"
 
     if ($uninstallCommand) {
-        Write-Host "Uninstalling existing installation of Node.js ..."
+        Write-Verbose "Uninstalling existing installation of Node.js ..."
         ensureElevatedModeOnWindows "Uninstalling Node requires elevated mode."
 
         $uninstallCommand = $uninstallCommand.replace('MsiExec.exe /I{', '/x{').replace('MsiExec.exe /X{', '/x{')
         cmd /c start /wait msiexec.exe $uninstallCommand /quiet
 
-        Write-Host "Uninstalled Node.js"
+        Write-Verbose "Uninstalled Node.js"
     } else {
-        Write-Host "Node.js is not installed"
+        Write-Verbose "Node.js is not installed"
     }
 }
 
@@ -154,15 +229,6 @@ function getUninstallString($productName) {
         | Where-Object { $_.DisplayName -and $_.DisplayName.Contains($productName) } `
         | Select-Object UninstallString).UninstallString
 }
-
-# if ($uninstallCommand) {
-#     Write-Host "Uninstalling existing installation of CosmosDB Emulator ..." -ForegroundColor Cyan
-
-#     $uninstallCommand = $uninstallCommand.replace('MsiExec.exe /I{', '/x{').replace('MsiExec.exe /X{', '/x{')
-#     cmd /c start /wait msiexec.exe $uninstallCommand /quiet
-
-#     Write-Host "Uninstalled $name" -ForegroundColor Green
-# }
 
 function ensureElevatedModeOnWindows([string]$msg) {
     if (-not $isLinux -and -not $isMacOS -and -not ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] 'Administrator')) {
