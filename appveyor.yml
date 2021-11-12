@@ -39,7 +39,7 @@ build_script:
 
     # publish module
     if ($env:APPVEYOR_REPO_TAG -eq 'true') {
-      Publish-Module -Path $env:APPVEYOR_BUILD_FOLDER\src -NuGetApiKey $env:psg_api_key
+      Publish-Module -Name $env:APPVEYOR_BUILD_FOLDER\src\anvm.psm1 -NuGetApiKey $env:psg_api_key
       Write-Host "Module has been successfully published" -ForegroundColor Green
     }
 
