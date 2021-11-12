@@ -1,9 +1,9 @@
 @{
     RootModule        = 'anvm.psm1'
-    ModuleVersion     = '0.1.0'
+    ModuleVersion     = '1.0.0'
     GUID              = '32c3b362-dfe9-4630-aa03-cff79ba1cbbb'
-    Author            = 'AppVeyor Systems Inc.'
-    CompanyName       = 'AppVeyor Systems Inc.'
+    Author            = 'Appveyor Systems Inc.'
+    CompanyName       = 'Appveyor Systems Inc.'
     Copyright         = 'Copyright (c) 2021-2022 Appveyor Systems Inc. All rights reserved.'
     Description       = 'AppVeyor Node.js Version Manager'
     PowerShellVersion = '5.0'

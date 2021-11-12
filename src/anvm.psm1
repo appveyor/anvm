@@ -5,6 +5,7 @@ if (Get-Command "7z" -ErrorAction SilentlyContinue) {
 }
 $node64Path = "$env:ProgramFiles\nodejs"
 $node32Path = "${env:ProgramFiles(x86)}\nodejs"
+$npmPath = "$env:APPDATA\npm"
 $global:node_versions = @()
 
 function Install-NodeVersion {
@@ -72,19 +73,47 @@ function Install-NodeVersion {
 
 function Set-NodeVersion {
     param(
-        [Parameter(Mandatory=$true, Position=0, ValueFromRemainingArguments=$true)]
-        [string]$version
+        [Parameter(Mandatory=$true, Position=0)]
+        [string]$version,
+        [Parameter(Mandatory=$false, Position=1)]
+        [ValidateSet('x64', 'x86')]
+        [string]$arch
     )
+
+    ensureElevatedModeOnWindows "Switching Node version requires elevated mode."
+
+    if (-not $arch) {
+        $arch = 'x64'
+    }
+
+    $version = getNodeVersion $version
+
+    $nodePath = getNodePath $version $arch
+    if (-not (Test-Path $nodePath)) {
+        Install-NodeVersion $version $arch
+    }
     
-    Write-Host "Use Node $version"
+    Write-Host "Using Node v$version $arch"
 
-    #New-Item -ItemType Directory -Force -Path $nvmPath
+    if (Test-Path $node64Path) {
+        (Get-Item $node64Path).Delete()
+    }
+    if (Test-Path $node32Path) {
+        (Get-Item $node32Path).Delete()
+    }
 
-    # 1. Call "Install-NodeVersion" to ensure required version installed
-    # 2. Delete both 32- and 64-bit Node symlinks
-    # 3. Create symlink to a required version
-    # 4. Modify PATH variable in session and on machine level:
-    #      - path to $node64Path, $node64Path and $env:APPDATA\npm
+    if ($arch -eq 'x64') {
+        New-Item -ItemType SymbolicLink -Path $node64Path -Target $nodePath | Out-Null
+    } else {
+        New-Item -ItemType SymbolicLink -Path $node32Path -Target $nodePath | Out-Null
+    }
+
+    addPath $node64Path
+    addPath $node32Path
+    addPath $npmPath
+    addSessionPath $node64Path
+    addSessionPath $node32Path
+    addSessionPath $npmPath 
 }
 
 function getNodePath($version, $arch) {
@@ -234,4 +263,35 @@ function ensureElevatedModeOnWindows([string]$msg) {
     if (-not $isLinux -and -not $isMacOS -and -not ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] 'Administrator')) {
         throw $msg
     }
+}
+
+function getSanitizedPath([string]$path) {
+    return $path.Replace('/', '\').Trim('\').Trim(' ')
+}
+
+function addPath([string]$path) {
+
+    $sanitizedPath = getSanitizedPath $path
+    $machinePath = [Environment]::GetEnvironmentVariable("path", "machine")
+
+    foreach($item in $machinePath.Split(";")) {
+        if($sanitizedPath -eq (getSanitizedPath $item)) {
+            return # already added
+        }
+    }
+
+    [Environment]::SetEnvironmentVariable("path", "$sanitizedPath;$machinePath", "machine")
+}
+
+function addSessionPath([string]$path) {
+
+    $sanitizedPath = getSanitizedPath $path
+
+    foreach($item in $env:path.Split(";")) {
+        if($sanitizedPath -eq (getSanitizedPath $item)) {
+            return # already added
+        }
+    }
+
+    $env:path = "$sanitizedPath;$env:path"
 }
