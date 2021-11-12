@@ -1,0 +1,46 @@
+
+image: Visual Studio 2019
+
+environment:
+  psg_api_key: 
+    secure: Dgx3NCcZ9Tp2Y3VtdZBvjsfNqZNHdS2I7ZfRIpI8OGFeJZuE8DLPHGRSFbF4aKln
+
+build_script:
+- ps: |
+    $ErrorActionPreference = "Stop"
+
+    if ($env:APPVEYOR_REPO_TAG -eq 'true') {
+
+      Write-Host "Publishing module to PowerShell Gallery..."
+
+      # version
+      $ver = $env:APPVEYOR_REPO_TAG_NAME
+      if ($ver.StartsWith('v')) { $ver = $ver.Substring(1) }
+
+      # version suffix
+      $idx = $ver.indexOf('-')
+      if ($idx -ne -1) {
+        $ver_suffix = $ver.Substring($idx + 1)
+        $ver_num = $ver.Substring(0, $idx)
+      } else {
+        $ver_suffix = ''
+        $ver_num = $ver
+      }
+    } else {
+      $ver = $ver_num = $env:APPVEYOR_BUILD_VERSION
+      $ver_suffix = ''
+    }
+
+    Write-Host "Module version: $ver"
+    Write-Host "Version suffix: $ver_suffix"
+
+    (Get-Content src\anvm.psd1).replace("'7.7.7'", "'$ver_num'") | Set-Content src\anvm.psd1
+    if ($ver_suffix) {(Get-Content src\anvm.psd1).replace("# Prerelease = 'beta'", "Prerelease = '$ver_suffix'") | Set-Content src\anvm.psd1 }    
+
+    # publish module
+    if ($env:APPVEYOR_REPO_TAG -eq 'true') {
+      Publish-Module -Path $env:APPVEYOR_BUILD_FOLDER\src -NuGetApiKey $env:psg_api_key
+      Write-Host "Module has been successfully published" -ForegroundColor Green
+    }
+
+test: off

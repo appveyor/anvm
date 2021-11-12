@@ -1,6 +1,6 @@
 @{
     RootModule        = 'anvm.psm1'
-    ModuleVersion     = '1.0.0'
+    ModuleVersion     = '7.7.7'
     GUID              = '32c3b362-dfe9-4630-aa03-cff79ba1cbbb'
     Author            = 'Appveyor Systems Inc.'
     CompanyName       = 'Appveyor Systems Inc.'
