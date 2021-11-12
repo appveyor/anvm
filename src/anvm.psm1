@@ -40,7 +40,8 @@ function Install-NodeVersion {
     } else {
         $origProg = $ProgressPreference
         $ProgressPreference = 'SilentlyContinue'
-        $fileName = "$productName-v$version-win-$arch.7z"
+        $ext = if ($sevenZipAvailable) { "7z"} else { "zip" }
+        $fileName = "$productName-v$version-win-$arch.$ext"
         try {
             $packageUrl = "$baseUrl/$fileName"
             Invoke-WebRequest -Uri $packageUrl -OutFile "$env:TEMP\$fileName" -UseBasicParsing
@@ -197,6 +198,7 @@ function unzip([string]$version, [string]$arch, [string]$zipfile)
     if ($sevenZipAvailable) {
         7z x $zipfile -y -o"$tempPath" | Out-Null
     } else {
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
         [System.IO.Compression.ZipFile]::ExtractToDirectory($zipfile, $tempPath)
     }
 
